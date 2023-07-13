@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LavaMoat Policy Schema",
+  "type": "object",
+  "$id": "lavamoat-policy.v0-0-1",
+  "properties": {
+    "resources": {
+      "type": "object",
+      "$comment": "This one or more valid npm package names delimited by a \">\" character, or the special case \"<root>\"",
+      "properties": {
+        "<root>": {
+          "$ref": "#/$defs/resourcePolicy"
+        }
+      },
+      "patternProperties": {
+        "^(@[a-z0-9-~][a-z0-9-._~]*/)?[a-z0-9-~][a-z0-9-._~]*(>(@[a-z0-9-~][a-z0-9-._~]*/)?[a-z0-9-~][a-z0-9-._~]*)*$": {
+          "$ref": "#/$defs/resourcePolicy"
+        }
+      },
+      "allowAdditionalProperties": false
+    }
+  },
+  "required": ["resources"],
+  "$defs": {
+    "resourcePolicy": {
+      "type": "object",
+      "minProperties": 1,
+      "properties": {
+        "globals": {
+          "type": "object",
+          "$comment": "A global property key can be any string (accessible via bracket notation)",
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        },
+        "packages": {
+          "type": "object",
+          "$comment": "This one or more valid npm package names delimited by a \">\" character",
+          "patternProperties": {
+            "^(@[a-z0-9-~][a-z0-9-._~]*/)?[a-z0-9-~][a-z0-9-._~]*(>(@[a-z0-9-~][a-z0-9-._~]*/)?[a-z0-9-~][a-z0-9-._~]*)*$": {
+              "type": "boolean"
+            }
+          },
+          "allowAdditionalProperties": false
+        }
+      },
+      "allowAdditionalProperties": false
+    }
+  }
+}
