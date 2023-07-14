@@ -18,17 +18,38 @@
         }
       },
       "allowAdditionalProperties": false
+    },
+    "resolutions": {
+      "type": "object",
+      "patternProperties": {
+        "^(@[a-z0-9-~][a-z0-9-._~]*/)?[a-z0-9-~][a-z0-9-._~]*(>(@[a-z0-9-~][a-z0-9-._~]*/)?[a-z0-9-~][a-z0-9-._~]*)*$": {
+          "type": "object",
+          "^(@[a-z0-9-~][a-z0-9-._~]*/)?[a-z0-9-~][a-z0-9-._~]*(>(@[a-z0-9-~][a-z0-9-._~]*/)?[a-z0-9-~][a-z0-9-._~]*)*$": {
+            "type": "string",
+            "pattern": "^/$|(^(?=/)|^\\.|^\\.\\.)(/(?=[^/\\0])[^/\\0]+)*/?$",
+            "minLength": 1,
+            "description": "Relative POSIX path to module from package root"
+          }
+        },
+        "allowAdditionalProperties": false
+      }
     }
   },
   "required": ["resources"],
   "$defs": {
     "resourcePolicy": {
       "type": "object",
-      "minProperties": 1,
       "properties": {
         "globals": {
           "type": "object",
           "$comment": "A global property key can be any string (accessible via bracket notation)",
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        },
+        "builtins": {
+          "type": "object",
+          "$comment": "I don't think narrowing the possible values here is feasible (or maintainable)",
           "additionalProperties": {
             "type": "boolean"
           }
