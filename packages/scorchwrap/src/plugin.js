@@ -122,6 +122,7 @@ const wrapGeneratorMaker = ({ ignores, getIdentifierForPath, runChecks }) => {
       // originalGenerate adds requirements to options.runtimeRequirements
 
       // skip doing anything if marked as ignored by the ignoreLoader
+      // TODO: what if someone specifies this loader inline in a require or import?
       if (module.loaders.some(({ loader }) => loader === IGNORE_LOADER)) {
         ignores.push(module.rawRequest);
         diag.rawDebug(3, `skipped wrapping ${module.rawRequest}`);
@@ -180,6 +181,7 @@ const wrapGeneratorMaker = ({ ignores, getIdentifierForPath, runChecks }) => {
         );
       }
     };
+    // @ts-ignore
     generatorInstance.generate.scorchwrap = true;
     return generatorInstance;
   };
@@ -247,7 +249,7 @@ class ScorchWrapPlugin {
       start: "start",
       transitions: {
         finishCollectingPaths: ["start", "pathsCollected"],
-        processPaths: ["pathsCollected", "pathsProcessed"],
+        pathProcessingDone: ["pathsCollected", "pathsProcessed"],
         runtimeStarted: ["pathsProcessed", "runtime"],
       },
     });
@@ -263,7 +265,16 @@ class ScorchWrapPlugin {
 
     // Concatenation won't work with wrapped modules. Have to disable it.
     compiler.options.optimization.concatenateModules = false;
-    // TODO: Research. If we fiddle a little with how we wrap the module, it might be possible to get inlining to work eventually.
+    // TODO: Research. If we fiddle a little with how we wrap the module, it might be possible to get inlining to work eventually by adding a closure that returns the module namespace. I just don't want to get into the compatibility of it all yet.
+    // TODO: explore how these settings affect the Compartment wrapping etc.
+    // compiler.options.optimization.runtimeChunk = false;
+    // compiler.options.optimization.mangleExports = false;
+    // compiler.options.optimization.usedExports = false;
+    // compiler.options.optimization.providedExports = false;
+    // compiler.options.optimization.sideEffects = false;
+    // compiler.options.optimization.moduleIds = "hashed";
+    // compiler.options.optimization.chunkIds = "named";
+
 
     let mainCompilationWarnings;
 
@@ -289,9 +300,16 @@ class ScorchWrapPlugin {
         let pathToIdentifierLookup = {};
         const runChecks = this.options.runChecks || diag.level > 0;
 
-        // Caveat: this might be called before the lookup map is ready if a plugin is running a child compilation or alike. Note that in those cases wrapped code is not meant to run and policy will be empty.
+        // Caveat: this might be called before the lookup map is ready if a plugin is running a child compilation or alike. 
+        // Note that in those cases wrapped code is not meant to run and policy will be empty.
         const getIdentifierForPath = (p) => pathToIdentifierLookup[p] || 'none';
 
+        // trigger for paths processing - after they've been collected
+        STATE.on("pathsCollected", () => {
+          pathToIdentifierLookup = pathsToIdentifiers(knownPaths);
+          STATE.transition("pathProcessingDone");
+        });
+        
         const coveredTypes = [
           JAVASCRIPT_MODULE_TYPE_AUTO,
           JAVASCRIPT_MODULE_TYPE_DYNAMIC,
@@ -325,21 +343,14 @@ class ScorchWrapPlugin {
           );
         }
 
+        // Report on ignored modules as late as possible. 
+        // This hook happens after all module generators have been executed.
         compilation.hooks.afterProcessAssets.tap(PLUGIN_NAME, () => {
           mainCompilationWarnings.push(
             new WebpackError(
               `in ScorchWrapPlugin: ignored modules \n  ${ignores.join("\n  ")}`
             )
           );
-        });
-
-        // =================================================================
-
-        // trigger for paths processing
-        STATE.on("pathsCollected", () => {
-          pathToIdentifierLookup = pathsToIdentifiers(knownPaths);
-
-          STATE.transition("processPaths");
         });
 
         // =================================================================
@@ -364,6 +375,8 @@ class ScorchWrapPlugin {
                 )
               );
             }
+
+            // narrow down the policy and map to module identifiers
 
             const lavaMoatRuntime = assembleRuntime(RUNTIME_KEY, [
               { name: "options", data: runtimeOptions, json: true },

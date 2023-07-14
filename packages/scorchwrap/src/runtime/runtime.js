@@ -7,7 +7,7 @@ const LOCKDOWN_ON = (typeof lockdown !== "undefined");
 if (LOCKDOWN_ON) {
   lockdown(LAVAMOAT.options.lockdown);
 } else {
-  console && console.warn('LavaMoat: runtime execution started without SES present, not running any modules.');
+  console && console.warn('LavaMoat: runtime execution started without SES present, switching to no-op.');
 }
 
 // These must match assumptions in the wrapper.js
