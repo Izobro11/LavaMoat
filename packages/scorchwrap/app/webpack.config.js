@@ -28,7 +28,7 @@ module.exports = {
       },
       policy: require('./lavamoat/policy.json'),
       runChecks: true,
-      diagnosticsVerbosity: 2,
+      diagnosticsVerbosity: 3,
     }),
     // virtualModules,
     new ProgressPlugin(),

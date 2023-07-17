@@ -161,6 +161,7 @@ const wrapGeneratorMaker = ({ ignores, getIdentifierForPath, runChecks }) => {
         runtimeKit: processRequirements(options.runtimeRequirements, module),
         runChecks,
         evalKitFunctionName: `__webpack_require__.${RUNTIME_KEY}.E`,
+        moduleId: module.id
       });
 
       diag.rawDebug(3, {

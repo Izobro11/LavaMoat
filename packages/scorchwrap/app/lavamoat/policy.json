@@ -1,5 +1,13 @@
 {
   "resources": {
+    "buffer": {
+      "packages":{
+        "base64-js": true
+      }
+    },
+    "base64-js": {},
+    "@ethereumjs/util>ethereum-cryptography>@noble/hashes": {},
+    "@ethereumjs/util>ethereum-cryptography>@noble/secp256k1": {},
     "@ethereumjs/util": {
       "builtin": {
         "buffer.Buffer.from": true,

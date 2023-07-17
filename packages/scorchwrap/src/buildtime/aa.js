@@ -85,7 +85,7 @@ exports.generateIdentifierLookup = (paths, policy) => {
         ...policy,
         resources: Object.fromEntries(
           Object.entries(policy.resources)
-            .filter(([id]) => identifiersWithKnownPaths.has(id))
+            .filter(([id]) => identifiersWithKnownPaths.has(id)) // only saves resources that are actually used
             .map(([id, resource]) => [
               translate(id, usedIdentifiersIndex),
               translateResource(resource),
