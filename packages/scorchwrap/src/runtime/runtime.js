@@ -29,7 +29,8 @@ const stricterScopeTerminator = freeze(
 // Policy implementation
 // This part would require bundling a subset of the core runtime
 const enforcePolicy = (pkg, resourceId) => {
-  // I could throw
+  // TODO: implement policy enforcement for module loading
+  // PROBLEM: pkg is a path. Can be looked up in __webpack_require__.m for a reference to the module closure, but not much else. Still looking for an efficient way to check if pkg is ok with the policy
 };
 const getGlobalsForPolicy = (resourceId) => {
   if(LAVAMOAT.policy?.resources[resourceId]?.globals) {

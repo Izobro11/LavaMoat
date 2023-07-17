@@ -21,7 +21,10 @@ const {
   // ModuleDependency,
 } = require("webpack");
 const { wrapper } = require("./buildtime/wrapper");
-const { pathsToIdentifiers } = require("./buildtime/aa");
+const {
+  pathsToIdentifiers,
+  generateIdentifierLookup,
+} = require("./buildtime/aa");
 const diag = require("./buildtime/diagnostics");
 const stateMachine = require("./buildtime/stateMachine");
 
@@ -44,7 +47,6 @@ const JAVASCRIPT_MODULE_TYPE_ESM = "javascript/esm";
 
 const RUNTIME_KEY = `_LM_`;
 const IGNORE_LOADER = path.join(__dirname, "./ignoreLoader.js");
-
 
 // TODO: processing requirements needs to be a tiny bit more clever yet.
 // Look in JavascriptModulesPlugin for how it decides if module and exports are unused.
@@ -275,7 +277,6 @@ class ScorchWrapPlugin {
     // compiler.options.optimization.moduleIds = "hashed";
     // compiler.options.optimization.chunkIds = "named";
 
-
     let mainCompilationWarnings;
 
     compiler.hooks.thisCompilation.tap(
@@ -297,19 +298,27 @@ class ScorchWrapPlugin {
 
         const ignores = [];
         const knownPaths = [];
-        let pathToIdentifierLookup = {};
+        // let pathToIdentifierLookup = {};
+        let identifierLookup;
         const runChecks = this.options.runChecks || diag.level > 0;
 
-        // Caveat: this might be called before the lookup map is ready if a plugin is running a child compilation or alike. 
+        // Caveat: this might be called before the lookup map is ready if a plugin is running a child compilation or alike.
         // Note that in those cases wrapped code is not meant to run and policy will be empty.
-        const getIdentifierForPath = (p) => pathToIdentifierLookup[p] || 'none';
+        const getIdentifierForPath = (p) => {
+          const withoutLoaders = p.replace(/[?!].*$/, "");
+          return identifierLookup.pathToModuleId(withoutLoaders) || "none";
+        }
 
         // trigger for paths processing - after they've been collected
         STATE.on("pathsCollected", () => {
-          pathToIdentifierLookup = pathsToIdentifiers(knownPaths);
+          identifierLookup = generateIdentifierLookup(
+            knownPaths,
+            options.policy
+          );
+          // pathToIdentifierLookup = pathsToIdentifiers(knownPaths);
           STATE.transition("pathProcessingDone");
         });
-        
+
         const coveredTypes = [
           JAVASCRIPT_MODULE_TYPE_AUTO,
           JAVASCRIPT_MODULE_TYPE_DYNAMIC,
@@ -343,7 +352,7 @@ class ScorchWrapPlugin {
           );
         }
 
-        // Report on ignored modules as late as possible. 
+        // Report on ignored modules as late as possible.
         // This hook happens after all module generators have been executed.
         compilation.hooks.afterProcessAssets.tap(PLUGIN_NAME, () => {
           mainCompilationWarnings.push(
@@ -368,19 +377,22 @@ class ScorchWrapPlugin {
           PLUGIN_NAME + "_runtime",
           (chunk, set) => {
             console.error("\n\n>>>R");
+            let policyData;
             if (STATE.getState() !== "pathsProcessed") {
               mainCompilationWarnings.push(
                 new WebpackError(
-                  "ScorchWrap: generating runtime before all modules resolved. This might be part of a sub-compilation of a plugin."
+                  "ScorchWrapPlugin: generating runtime before all modules resolved. This might be part of a sub-compilation of a plugin."
                 )
               );
+              policyData = {};
+            } else {
+              // narrow down the policy and map to module identifiers
+              policyData = identifierLookup.getTranslatedPolicy();
             }
-
-            // narrow down the policy and map to module identifiers
 
             const lavaMoatRuntime = assembleRuntime(RUNTIME_KEY, [
               { name: "options", data: runtimeOptions, json: true },
-              { name: "policy", data: options.policy, json: true },
+              { name: "policy", data: policyData, json: true },
               { name: "ENUM", file: "./ENUM.json", json: true },
               { name: "runtime", file: "./runtime/runtime.js" },
             ]);
