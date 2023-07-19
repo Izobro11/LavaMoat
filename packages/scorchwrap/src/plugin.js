@@ -33,6 +33,7 @@ const { ConcatSource } = require("webpack-sources");
 
 // @ts-ignore // this one doesn't have official types
 const RUNTIME_GLOBALS = require("webpack/lib/RuntimeGlobals");
+const { loadCanonicalNameMap } = require("@lavamoat/aa");
 
 // TODO: upcoming version of webpack may expose these constants
 // https://github.com/webpack/webpack/blob/07ac43333654280c5bc6014a3a69eda4c3b80273/lib/ModuleTypeConstants.js
@@ -92,7 +93,12 @@ function processRequirements(requirements, module) {
 /**
  * @param {object} options
  */
-const wrapGeneratorMaker = ({ ignores, getIdentifierForPath, runChecks }) => {
+const wrapGeneratorMaker = ({
+  ignores,
+  getIdentifierForPath,
+  runChecks,
+  STATE,
+}) => {
   /**
    * @param {Generator} generatorInstance
    * @returns {Generator}
@@ -265,6 +271,7 @@ class ScorchWrapPlugin {
   apply(compiler) {
     const options = this.options;
     const STATE = this.STATE;
+    let canonicalNameMap;
 
     // Concatenation won't work with wrapped modules. Have to disable it.
     compiler.options.optimization.concatenateModules = false;
@@ -277,6 +284,18 @@ class ScorchWrapPlugin {
     // compiler.options.optimization.sideEffects = false;
     // compiler.options.optimization.moduleIds = "hashed";
     // compiler.options.optimization.chunkIds = "named";
+
+    // =================================================================
+    // run long asynchronous processing ahead of time
+    compiler.hooks.beforeRun.tapAsync(
+      "PLUGIN_NAME",
+      async (compilation, callback) => {
+        canonicalNameMap = await loadCanonicalNameMap({
+          rootDir: compiler.context,
+        });
+        callback();
+      }
+    );
 
     let mainCompilationWarnings;
 
@@ -312,11 +331,11 @@ class ScorchWrapPlugin {
 
         // trigger for paths processing - after they've been collected
         STATE.on("pathsCollected", () => {
-          identifierLookup = generateIdentifierLookup(
-            knownPaths,
-            options.policy
-          );
-          // pathToIdentifierLookup = pathsToIdentifiers(knownPaths);
+          identifierLookup = generateIdentifierLookup({
+            paths: knownPaths,
+            policy: options.policy,
+            canonicalNameMap,
+          });
           STATE.transition("pathProcessingDone");
         });
 
@@ -341,25 +360,23 @@ class ScorchWrapPlugin {
         // compilation.hooks.finishModules.tap(PLUGIN_NAME, () => {
         //   STATE.transition("finishCollectingPaths");
         // });
-        compilation.hooks.afterOptimizeChunkIds.tap('MyPlugin', (chunks) => {
+        compilation.hooks.afterOptimizeChunkIds.tap("MyPlugin", (chunks) => {
           const chunkGraph = compilation.chunkGraph;
-        
-          chunks.forEach(chunk => {
-            chunkGraph.getChunkModules(chunk).forEach(module => {
-              const moduleId = chunkGraph.getModuleId(module); 
-              knownPaths.push({path:module.resource, moduleId});
+
+          chunks.forEach((chunk) => {
+            chunkGraph.getChunkModules(chunk).forEach((module) => {
+              const moduleId = chunkGraph.getModuleId(module);
+              knownPaths.push({ path: module.resource, moduleId }); // typescript is complaining about the use of `resource` here, but it's actually there.
             });
           });
-          diag.rawDebug(4, "knownPaths", knownPaths);
+          diag.rawDebug(4, { knownPaths });
           STATE.transition("finishCollectingPaths");
         });
-              // lists modules, but reaching for id can give a deprecation warning.
-              // compilation.hooks.afterOptimizeModuleIds.tap(PLUGIN_NAME, (modules) => {
-              //   console.log('________________________________',modules.__proto__.constructor)
-              //   Array.from(modules).map(module => console.log(module.resource, module.id))
-              // });
-
-       
+        // lists modules, but reaching for id can give a deprecation warning.
+        // compilation.hooks.afterOptimizeModuleIds.tap(PLUGIN_NAME, (modules) => {
+        //   console.log('________________________________',modules.__proto__.constructor)
+        //   Array.from(modules).map(module => console.log(module.resource, module.id))
+        // });
 
         // Hook into all types of JavaScript NormalModules
         for (const moduleType of coveredTypes) {
@@ -369,6 +386,7 @@ class ScorchWrapPlugin {
               ignores,
               runChecks,
               getIdentifierForPath,
+              STATE,
             })
           );
         }
@@ -414,7 +432,11 @@ class ScorchWrapPlugin {
             }
 
             const lavaMoatRuntime = assembleRuntime(RUNTIME_KEY, [
-              { name: "idmap", data: identifierLookup?.identifiersForModuleIds, json: true },
+              {
+                name: "idmap",
+                data: identifierLookup?.identifiersForModuleIds,
+                json: true,
+              },
               { name: "options", data: runtimeOptions, json: true },
               { name: "policy", data: policyData, json: true },
               { name: "ENUM", file: "./ENUM.json", json: true },

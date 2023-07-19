@@ -1,5 +1,10 @@
 // Should translate AAs to numbers?
-const TRANSLATE_AA_TO_NUMBERS = true;
+const TRANSLATE_AA_TO_NUMBERS = false;
+
+const {
+  loadCanonicalNameMap,
+  getPackageNameForModulePath,
+} = require("@lavamoat/aa");
 
 // Temporary implementation
 // TODO: use real AA
@@ -25,29 +30,30 @@ const fakeAA = (modulePath) => {
   return chunks.join(">");
 };
 
-const pathsToIdentifiers = (paths) => {
-  const mapping = {};
-  for (const p of paths) {
-    if (p.path) {
-      mapping[p.path] = { aa: fakeAA(p.path), moduleId: p.moduleId };
-    }
-  }
-  return mapping;
-};
-
-exports.pathsToIdentifiers = pathsToIdentifiers;
-
 const lookUp = (needle, haystack) => {
   const value = haystack[needle];
   if (value === undefined) {
     // webpack may attempt to go through out-of-policy stuff as we're plugging into webpack's `resolve` and that may be used by plugins to resolve things not in the bundle. Eg. app/node_modules/esbuild-loader/dist/index.cjs is being resolved.
     console.trace(`Cannot find a match for ${needle} in policy`);
-    console.log(haystack)
+    // console.log(haystack);
   }
   return value;
 };
 
-exports.generateIdentifierLookup = (paths, policy) => {
+exports.generateIdentifierLookup = ({ paths, policy, canonicalNameMap }) => {
+  const pathsToIdentifiers = (paths) => {
+    const mapping = {};
+    for (const p of paths) {
+      if (p.path) {
+        mapping[p.path] = {
+          aa: getPackageNameForModulePath(canonicalNameMap, p.path),
+          moduleId: p.moduleId,
+        };
+      }
+    }
+    return mapping;
+  };
+
   const usedIdentifiers = Object.keys(policy.resources);
   const usedIdentifiersIndex = Object.fromEntries(
     usedIdentifiers.map((id, index) => [id, index])
@@ -94,7 +100,7 @@ exports.generateIdentifierLookup = (paths, policy) => {
   return {
     identifiersForModuleIds,
     pathToResourceId: (path) => {
-      const pathInfo = lookUp(path, pathLookup)
+      const pathInfo = lookUp(path, pathLookup);
       if (!pathInfo) return undefined;
       return translate(pathInfo.aa);
     },

@@ -33,6 +33,8 @@ const stricterScopeTerminator = freeze(
 // Policy implementation
 // This part would require bundling a subset of the core runtime
 const enforcePolicy = (requestedResourceId, referrerResourceId) => {
+  requestedResourceId = "" + requestedResourceId;
+  referrerResourceId = "" + referrerResourceId;
   // TODO: make root check reasonable
   if (
     referrerResourceId === "$root$" ||
@@ -61,6 +63,7 @@ const getGlobalsForPolicy = (resourceId) => {
       entries(LAVAMOAT.policy.resources[resourceId].globals)
         .filter(([key, value]) => value)
         .map(([key, value]) => {
+          key = key.split(".")[0];
           if (typeof globalThis[key] === "function") {
             return [key, globalThis[key].bind(globalThis)];
           }
@@ -68,11 +71,14 @@ const getGlobalsForPolicy = (resourceId) => {
         })
     );
   }
+  if (resourceId === "$root$") {
+    return {
+      ...globalThis,
+      console
+    }
+  }
   // I could return a subset of globals
-  return {
-    console,
-    WebAssembly,
-  };
+  return {};
 };
 
 const compartmentMap = new Map();

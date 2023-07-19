@@ -49,6 +49,10 @@ module.exports = {
 
 One important thing to note when using the ScorchWrap plugin is that it disables the `concatenateModules` optimization in webpack. This is because concatenation won't work with wrapped modules.
 
+### Gotchas
+
+- Webpack will gladly add missing dependencies for node builtins like the `events` or `buffer` packages. For LavaMoat policy to handle it, the package needs to be explicitly listed in prod dependencies.
+
 # Security Claims
 
 - SES must be added to the page without any bundling or transforming for any security guarantees to be sustained.
@@ -82,9 +86,13 @@ waa --> p
 p --> w[replace AAs with numbers from a sequence]
 w --> b[use short identifiers in the bundle and inlined policy]
 
-
-
 ```
+
+Webpack generates this:
+```
+const nodeCrypto = __webpack_require__(/*! crypto */ "?0b7d");
+```
+and it shows up where I list modules, but it doesn't have an associated path and I can't seem to figure out how it should be handled. It's the closest thing to a builtin in the browser. Maybe instead of handling builtins as packages we need special logic for stuff like `buffer` and `events` and this thing. Or maybe just this thing.
 
 ## Manual testing
 
