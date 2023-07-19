@@ -34,23 +34,26 @@ const stricterScopeTerminator = freeze(
 // This part would require bundling a subset of the core runtime
 const enforcePolicy = (requestedResourceId, referrerResourceId) => {
   // TODO: make root check reasonable
-  if(referrerResourceId === '$root$') {
-    return
+  if (
+    referrerResourceId === "$root$" ||
+    requestedResourceId === referrerResourceId
+  ) {
+    return;
   }
   // TODO: switch from warnings to errors when AAs consistency is resolved
   const myPolicy = LAVAMOAT.policy.resources[referrerResourceId];
   if (!myPolicy) {
-    console.warn("Policy missing for " + referrerResourceId);
+    return console.warn("Policy missing for " + referrerResourceId);
   }
-  if (
-    myPolicy.packages &&
-    myPolicy.packages[
-      requestedResourceId
-    ]
-  ) {
+  if (myPolicy.packages && myPolicy.packages[requestedResourceId]) {
     return;
   }
-  console.warn('Policy does not allow importing '+requestedResourceId+' from '+referrerResourceId);
+  console.warn(
+    "Policy does not allow importing " +
+      requestedResourceId +
+      " from " +
+      referrerResourceId
+  );
 };
 const getGlobalsForPolicy = (resourceId) => {
   if (LAVAMOAT.policy?.resources[resourceId]?.globals) {
@@ -73,22 +76,27 @@ const getGlobalsForPolicy = (resourceId) => {
 };
 
 const compartmentMap = new Map();
-const moduleToResourceId = new Map();
+const findResourceId = (moduleId) => {
+  const found = LAVAMOAT.idmap.find(([resourceId, moduleIds]) =>
+    moduleIds.includes(moduleId)
+  );
+  if (found) {
+    return found[0];
+  }
+};
 
 const wrapRequireWithPolicy = (__webpack_require__, referrerResourceId) =>
   function (specifier) {
-    const namespace = __webpack_require__.apply(this, arguments);
-    const requestedResourceId = moduleToResourceId.get(specifier);
+    const requestedResourceId = findResourceId(specifier);
     enforcePolicy(requestedResourceId, referrerResourceId);
-    return namespace;
+    return __webpack_require__.apply(this, arguments);
   };
 
-const lavamoatRuntimeWrapper = (resourceId, moduleId, runtimeKit) => {
+const lavamoatRuntimeWrapper = (resourceId, runtimeKit) => {
   if (!LOCKDOWN_ON) {
     // Scope Terminator not being present in the output causes the wrapper closure to run a no-op instaed of the module body
     return create(null);
   }
-  moduleToResourceId.set(moduleId, resourceId);
   let overrides = create(null);
 
   // modules may reference `require` dynamically, but that's something we don't want to allow

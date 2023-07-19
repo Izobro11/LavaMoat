@@ -9,7 +9,6 @@ const q = JSON.stringify;
  * @property {string} id
  * @property {string[] | Set<string>} runtimeKit
  * @property {string} evalKitFunctionName
- * @property {string | number} moduleId
  * @property {boolean} [runChecks]
  *
  */
@@ -38,7 +37,6 @@ exports.wrapper = function wrapper({
   runtimeKit,
   evalKitFunctionName,
   runChecks = true,
-  moduleId // assuming this is sanitized by webpack. TODO: doublecheck
 }) {
   // validateSource(source);
 
@@ -62,7 +60,7 @@ exports.wrapper = function wrapper({
       }
     }
     }
-}).call(${evalKitFunctionName}(${q(id)}, ${q(moduleId)}, { ${Array.from(
+}).call(${evalKitFunctionName}(${q(id)}, { ${Array.from(
     runtimeKit
   ).join(",")}}))()`;
   if (runChecks) {

@@ -1,5 +1,5 @@
 // Should translate AAs to numbers?
-const TRANSLATE_AA_TO_NUMBERS = false;
+const TRANSLATE_AA_TO_NUMBERS = true;
 
 // Temporary implementation
 // TODO: use real AA
@@ -26,7 +26,13 @@ const fakeAA = (modulePath) => {
 };
 
 const pathsToIdentifiers = (paths) => {
-  return Object.fromEntries(paths.map((p) => [p, fakeAA(p)]));
+  const mapping = {};
+  for (const p of paths) {
+    if (p.path) {
+      mapping[p.path] = { aa: fakeAA(p.path), moduleId: p.moduleId };
+    }
+  }
+  return mapping;
 };
 
 exports.pathsToIdentifiers = pathsToIdentifiers;
@@ -35,30 +41,42 @@ const lookUp = (needle, haystack) => {
   const value = haystack[needle];
   if (value === undefined) {
     // webpack may attempt to go through out-of-policy stuff as we're plugging into webpack's `resolve` and that may be used by plugins to resolve things not in the bundle. Eg. app/node_modules/esbuild-loader/dist/index.cjs is being resolved.
-    console.error(`Cannot find a match for ${needle} in policy`);
+    console.trace(`Cannot find a match for ${needle} in policy`);
+    console.log(haystack)
   }
   return value;
 };
 
-// choose the implementation - to translate from AA to numbers or not
-let translate;
-if (TRANSLATE_AA_TO_NUMBERS) {
-  translate = lookUp;
-} else {
-  translate = (i) => i;
-}
-
 exports.generateIdentifierLookup = (paths, policy) => {
   const usedIdentifiers = Object.keys(policy.resources);
+  const usedIdentifiersIndex = Object.fromEntries(
+    usedIdentifiers.map((id, index) => [id, index])
+  );
+  // choose the implementation - to translate from AA to numbers or not
+  let translate;
+  if (TRANSLATE_AA_TO_NUMBERS) {
+    translate = (i) => lookUp(i, usedIdentifiersIndex);
+  } else {
+    translate = (i) => i;
+  }
 
-  // TODO: it's likely that the current way we generate real AAs from node_modules would produce some shorter identifiers than it'd otherwise produce from just looking at the paths in use.
+  // TODO: it's likely that the current way we generate real AAs from node_modules would produce different identifiers than it'd otherwise produce from just looking at the paths in use.
   // We'll need to persist enough data to look up paths OR make sure policy generation only takes into account the paths involved.
   // Also, the numbers should probably come from webpack itself for later lookup at runtime
 
   const pathLookup = pathsToIdentifiers(paths);
-  const identifiersWithKnownPaths = new Set(Object.values(pathLookup));
-  const usedIdentifiersIndex = Object.fromEntries(
-    usedIdentifiers.map((id, index) => [id, index])
+  const identifiersWithKnownPaths = new Set(
+    Object.values(pathLookup).map((pl) => pl.aa)
+  );
+  const identifiersForModuleIds = Object.entries(
+    Object.entries(pathLookup).reduce((acc, [_path, { aa, moduleId }]) => {
+      const key = translate(aa);
+      if (acc[key] === undefined) {
+        acc[key] = [];
+      }
+      acc[key].push(moduleId);
+      return acc;
+    }, {})
   );
 
   const translateResource = (resource) => ({
@@ -67,16 +85,20 @@ exports.generateIdentifierLookup = (paths, policy) => {
       resource.packages &&
       Object.fromEntries(
         Object.entries(resource.packages).map(([id, value]) => [
-          translate(id, usedIdentifiersIndex),
+          translate(id),
           value,
         ])
       ),
   });
 
   return {
-    pathToModuleId: (path) =>
-      translate(lookUp(path, pathLookup), usedIdentifiersIndex),
-    policyIdentifierToModuleId: (id) => translate(id, usedIdentifiersIndex),
+    identifiersForModuleIds,
+    pathToResourceId: (path) => {
+      const pathInfo = lookUp(path, pathLookup)
+      if (!pathInfo) return undefined;
+      return translate(pathInfo.aa);
+    },
+    policyIdentifierToResourceId: (id) => translate(id),
     getTranslatedPolicy: () => {
       if (!TRANSLATE_AA_TO_NUMBERS) {
         return policy;
@@ -87,7 +109,7 @@ exports.generateIdentifierLookup = (paths, policy) => {
           Object.entries(policy.resources)
             .filter(([id]) => identifiersWithKnownPaths.has(id)) // only saves resources that are actually used
             .map(([id, resource]) => [
-              translate(id, usedIdentifiersIndex),
+              translate(id),
               translateResource(resource),
             ])
         ),

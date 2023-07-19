@@ -10,8 +10,8 @@ module.exports = {
     app: "./app.js",
   },
   // both modes work
-  // mode: "production",
-  mode: "development",
+  mode: "production",
+  // mode: "development",
   output: {
     filename: "[name].js",
     path: path.resolve(__dirname, "dist"),
@@ -28,7 +28,7 @@ module.exports = {
       },
       policy: require('./lavamoat/policy.json'),
       runChecks: true,
-      diagnosticsVerbosity: 3,
+      diagnosticsVerbosity: 4,
     }),
     // virtualModules,
     new ProgressPlugin(),

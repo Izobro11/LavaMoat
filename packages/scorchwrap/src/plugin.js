@@ -88,6 +88,7 @@ function processRequirements(requirements, module) {
   return runtimeKit;
 }
 
+// TODO: this should probably be extracted to a separate file for easier navigation
 /**
  * @param {object} options
  */
@@ -114,7 +115,7 @@ const wrapGeneratorMaker = ({ ignores, getIdentifierForPath, runChecks }) => {
      */
     generatorInstance.generate = function (module, options) {
       console.error(">>>G");
-      diag.rawDebug(4, {
+      diag.rawDebug(5, {
         module,
         options,
       });
@@ -161,7 +162,6 @@ const wrapGeneratorMaker = ({ ignores, getIdentifierForPath, runChecks }) => {
         runtimeKit: processRequirements(options.runtimeRequirements, module),
         runChecks,
         evalKitFunctionName: `__webpack_require__.${RUNTIME_KEY}.E`,
-        moduleId: module.id
       });
 
       diag.rawDebug(3, {
@@ -307,8 +307,8 @@ class ScorchWrapPlugin {
         // Note that in those cases wrapped code is not meant to run and policy will be empty.
         const getIdentifierForPath = (p) => {
           const withoutLoaders = p.replace(/[?!].*$/, "");
-          return identifierLookup.pathToModuleId(withoutLoaders) || "none";
-        }
+          return identifierLookup.pathToResourceId(withoutLoaders) || "none";
+        };
 
         // trigger for paths processing - after they've been collected
         STATE.on("pathsCollected", () => {
@@ -326,20 +326,40 @@ class ScorchWrapPlugin {
           JAVASCRIPT_MODULE_TYPE_ESM,
         ];
 
-        // collect all paths resolved for the bundle
-        normalModuleFactory.hooks.afterResolve.tap(
-          PLUGIN_NAME,
-          (resolveData) => {
-            // TODO - typescript claims createData could be undefined. Do we care for those cases?
-            // Leaving it in a state where we'll get an error first time it happens.
-            if (coveredTypes.includes(resolveData.createData.type)) {
-              knownPaths.push(resolveData.createData.resourceResolveData.path);
-            }
-          }
-        );
-        compilation.hooks.finishModules.tap(PLUGIN_NAME, () => {
+        // Old: good for collecting all possible paths, but bad for matching them with module ids
+        // collect all paths resolved for the bundle and transition afterwards
+        // normalModuleFactory.hooks.afterResolve.tap(
+        //   PLUGIN_NAME,
+        //   (resolveData) => {
+        //     // TODO - typescript claims createData could be undefined. Do we care for those cases?
+        //     // Leaving it in a state where we'll get an error first time it happens.
+        //     if (coveredTypes.includes(resolveData.createData.type)) {
+        //       knownPaths.push([resolveData.createData.resourceResolveData.path, /*resolveData.createData.moduleId*/]);
+        //     }
+        //   }
+        // );
+        // compilation.hooks.finishModules.tap(PLUGIN_NAME, () => {
+        //   STATE.transition("finishCollectingPaths");
+        // });
+        compilation.hooks.afterOptimizeChunkIds.tap('MyPlugin', (chunks) => {
+          const chunkGraph = compilation.chunkGraph;
+        
+          chunks.forEach(chunk => {
+            chunkGraph.getChunkModules(chunk).forEach(module => {
+              const moduleId = chunkGraph.getModuleId(module); 
+              knownPaths.push({path:module.resource, moduleId});
+            });
+          });
+          diag.rawDebug(4, "knownPaths", knownPaths);
           STATE.transition("finishCollectingPaths");
         });
+              // lists modules, but reaching for id can give a deprecation warning.
+              // compilation.hooks.afterOptimizeModuleIds.tap(PLUGIN_NAME, (modules) => {
+              //   console.log('________________________________',modules.__proto__.constructor)
+              //   Array.from(modules).map(module => console.log(module.resource, module.id))
+              // });
+
+       
 
         // Hook into all types of JavaScript NormalModules
         for (const moduleType of coveredTypes) {
@@ -356,6 +376,7 @@ class ScorchWrapPlugin {
         // Report on ignored modules as late as possible.
         // This hook happens after all module generators have been executed.
         compilation.hooks.afterProcessAssets.tap(PLUGIN_NAME, () => {
+          diag.rawDebug(3, "> afterProcessAssets");
           mainCompilationWarnings.push(
             new WebpackError(
               `in ScorchWrapPlugin: ignored modules \n  ${ignores.join("\n  ")}`
@@ -377,6 +398,7 @@ class ScorchWrapPlugin {
         compilation.hooks.additionalChunkRuntimeRequirements.tap(
           PLUGIN_NAME + "_runtime",
           (chunk, set) => {
+            diag.rawDebug(3, "> additionalChunkRuntimeRequirements");
             console.error("\n\n>>>R");
             let policyData;
             if (STATE.getState() !== "pathsProcessed") {
@@ -392,6 +414,7 @@ class ScorchWrapPlugin {
             }
 
             const lavaMoatRuntime = assembleRuntime(RUNTIME_KEY, [
+              { name: "idmap", data: identifierLookup?.identifiersForModuleIds, json: true },
               { name: "options", data: runtimeOptions, json: true },
               { name: "policy", data: policyData, json: true },
               { name: "ENUM", file: "./ENUM.json", json: true },
@@ -400,7 +423,7 @@ class ScorchWrapPlugin {
 
             // If the chunk has already been processed, skip it.
             if (onceForChunkSet.has(chunk)) return;
-            set.add(RuntimeGlobals.onChunksLoaded); // TODO: develop an understanding of what this line does xD
+            // set.add(RuntimeGlobals.onChunksLoaded); // TODO: develop an understanding of what this line does and why it was a part of the runtime setup for module federation
 
             // Mark the chunk as processed by adding it to the WeakSet.
             onceForChunkSet.add(chunk);

@@ -10,11 +10,17 @@ Implemented capabilities:
  - [x] runtime to make wrapped modules work
  - [x] turn off concatenateModules and warn it's incompatible
  - [x] inlining runtime into the bundle
- - [ ] using actual policies
+ - [x] including actual policies
+ - [ ] using policies to control module loading at runtime
+ - [ ] using policies to limit globals at runtime
  - [ ] researching and covering all `__webpack_require__.*` functions for security as needed 
+ - [ ] support dynamic imports/requires reaching beyond the bundled content
  - [ ] paranoid mode checks
  - [ ] research potential concatenateModules support
  - [ ] ecosystem compatibility quirks we're yet to find
+
+*(for more specific issues to solve see TODO comments in code)*
+
 
 
 ## Usage
