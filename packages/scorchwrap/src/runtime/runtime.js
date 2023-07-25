@@ -1,8 +1,8 @@
 const { create, freeze, assign, defineProperty, entries, fromEntries } = Object;
 
-// SES is added to the page, but not when fragments of the bundle are running during compilation.
-// Some plugins, like CSS extractors, are running code from the bundle at compile time and need not to fail here.
 // Avoid running any wrapped code or using compartment if lockdown was not called.
+// This is for when the bundle ends up running despite SES being missing. 
+// It was previously useful for sub-compilations running an incomplete bundle as part of the build, but currently that is being skipped. We might go back to it for the sake of build time security if it's deemed worthwihile in absence of lockdown.
 const LOCKDOWN_ON = typeof lockdown !== "undefined";
 if (LOCKDOWN_ON) {
   lockdown(LAVAMOAT.options.lockdown);
@@ -153,4 +153,5 @@ const lavamoatRuntimeWrapper = (resourceId, runtimeKit) => {
   };
 };
 
-LAVAMOAT.runtimeWrapper = freeze(lavamoatRuntimeWrapper);
+// defaultExport is getting assigned to __webpack_require__._LM_
+LAVAMOAT.defaultExport = freeze(lavamoatRuntimeWrapper);

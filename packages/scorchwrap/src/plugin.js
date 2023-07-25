@@ -122,10 +122,17 @@ const wrapGeneratorMaker = ({
         module,
         options,
       });
+
       // using this in webpack.config.ts complained about some mismatch
       // @ts-ignore
       const originalGeneratedSource = originalGenerate.apply(this, arguments);
-      // originalGenerate adds requirements to options.runtimeRequirements
+
+      // bail out if we're dealing with a subcompilation from a plugin and such - they may run too early
+      if (!STATE.is("pathsProcessed")) {
+        return originalGeneratedSource;
+      }
+
+      // originalGenerate adds requirements to options.runtimeRequirements. runtimeKit needs to be derived from those.
 
       // skip doing anything if marked as ignored by the ignoreLoader
       // TODO: what if someone specifies this loader inline in a require or import?
@@ -155,7 +162,7 @@ const wrapGeneratorMaker = ({
 
       const packageId = getIdentifierForPath(module.resource);
       if (packageId === undefined) {
-        console.log(module) 
+        console.log(module);
         throw Error(`Failed to find a packageId for ${module.resource}`);
       }
 
@@ -226,9 +233,8 @@ const assembleRuntime = (KEY, runtimeModules) => {
     }
     assembly += `\n;/*${name}*/;\n${sourceString}`;
   });
-  // use harden from SES if available
   assembly += `;
-  __webpack_require__.${KEY} = LAVAMOAT.runtimeWrapper;
+  __webpack_require__.${KEY} = LAVAMOAT.defaultExport;
   (typeof harden !== 'undefined') && harden(__webpack_require__.${KEY});`; // The harden line is likely unnecessary as the handler is being frozen anyway
   return {
     addTo({ compilation, chunk }) {
@@ -256,12 +262,15 @@ class ScorchWrapPlugin {
    */
   constructor(options = { policy: {} }) {
     this.options = options;
+
+    // TODO: figure out the right scope to use this chronology tool
     this.STATE = stateMachine({
       start: "start",
       transitions: {
         finishCollectingPaths: ["start", "pathsCollected"],
         pathProcessingDone: ["pathsCollected", "pathsProcessed"],
-        runtimeStarted: ["pathsProcessed", "runtime"],
+        runtimeBuildingStarted: ["pathsProcessed", "runtime"],
+        runtimeBuilt: ["runtime", "runtimeAdded"],
       },
     });
     diag.level = options.diagnosticsVerbosity || 0;
@@ -320,18 +329,18 @@ class ScorchWrapPlugin {
         }
 
         // =================================================================
-        // javascript modules generator tweaks installation
+        // processin of the paths involved in the bundle and cross-check with policy
 
         const ignores = [];
         const knownPaths = [];
         const unenforceableModuleIds = [];
-        // let pathToIdentifierLookup = {};
         let identifierLookup;
         const runChecks = this.options.runChecks || diag.level > 0;
 
         // Caveat: this might be called before the lookup map is ready if a plugin is running a child compilation or alike.
         // Note that in those cases wrapped code is not meant to run and policy will be empty.
         const getIdentifierForPath = (p) => {
+          STATE.assert("pathsProcessed");
           return identifierLookup.pathToResourceId(p);
         };
 
@@ -399,6 +408,9 @@ class ScorchWrapPlugin {
         //   Array.from(modules).map(module => console.log(module.resource, module.id))
         // });
 
+        // =================================================================
+        // javascript modules generator tweaks installation
+
         // Hook into all types of JavaScript NormalModules
         for (const moduleType of coveredTypes) {
           normalModuleFactory.hooks.generator.for(moduleType).tap(
@@ -437,57 +449,65 @@ class ScorchWrapPlugin {
         compilation.hooks.additionalChunkRuntimeRequirements.tap(
           PLUGIN_NAME + "_runtime",
           (chunk, set) => {
-            diag.rawDebug(3, "> additionalChunkRuntimeRequirements");
-            console.error("\n\n>>>R");
-            let policyData;
-            if (STATE.getState() !== "pathsProcessed") {
+            if (!STATE.is("pathsProcessed")) {
               mainCompilationWarnings.push(
                 new WebpackError(
-                  "ScorchWrapPlugin: generating runtime before all modules resolved. This might be part of a sub-compilation of a plugin. Please check for any unwanted interference between plugins."
+                  "ScorchWrapPlugin: Something was generating runtime before all modules were identified. This might be part of a sub-compilation of a plugin. Please check for any unwanted interference between plugins."
                 )
               );
-              policyData = {};
+              diag.rawDebug(
+                1,
+                "> skipped adding runtime (additionalChunkRuntimeRequirements)"
+              );
+              // It's possible to generate the runtime with an empty policy to make the wrapped code work. It's no longer necessasry now that `generate` function is only wrapping anything if runtime has already been added.
             } else {
+              diag.rawDebug(
+                1,
+                "> adding runtime (additionalChunkRuntimeRequirements)"
+              );
               // narrow down the policy and map to module identifiers
-              policyData = identifierLookup.getTranslatedPolicy();
-            }
+              const policyData = identifierLookup.getTranslatedPolicy();
+              STATE.transition("runtimeBuildingStarted");
 
-            const lavaMoatRuntime = assembleRuntime(RUNTIME_KEY, [
-              {
-                name: "root",
-                data: identifierLookup?.root,
-                json: true,
-              },
-              {
-                name: "idmap",
-                data: identifierLookup?.identifiersForModuleIds,
-                json: true,
-              },
-              {
-                name: "unenforceable",
-                data: identifierLookup?.unenforceableModuleIds,
-                json: true,
-              },
-              { name: "options", data: runtimeOptions, json: true },
-              { name: "policy", data: policyData, json: true },
-              { name: "ENUM", file: "./ENUM.json", json: true },
-              { name: "runtime", file: "./runtime/runtime.js" },
-            ]);
+              const lavaMoatRuntime = assembleRuntime(RUNTIME_KEY, [
+                {
+                  name: "root",
+                  data: identifierLookup?.root,
+                  json: true,
+                },
+                {
+                  name: "idmap",
+                  data: identifierLookup?.identifiersForModuleIds,
+                  json: true,
+                },
+                {
+                  name: "unenforceable",
+                  data: identifierLookup?.unenforceableModuleIds,
+                  json: true,
+                },
+                { name: "options", data: runtimeOptions, json: true },
+                { name: "policy", data: policyData, json: true },
+                { name: "ENUM", file: "./ENUM.json", json: true },
+                { name: "runtime", file: "./runtime/runtime.js" },
+              ]);
 
-            // If the chunk has already been processed, skip it.
-            if (onceForChunkSet.has(chunk)) return;
-            // set.add(RuntimeGlobals.onChunksLoaded); // TODO: develop an understanding of what this line does and why it was a part of the runtime setup for module federation
+              // If the chunk has already been processed, skip it.
+              if (onceForChunkSet.has(chunk)) return;
+              // set.add(RuntimeGlobals.onChunksLoaded); // TODO: develop an understanding of what this line does and why it was a part of the runtime setup for module federation
 
-            // Mark the chunk as processed by adding it to the WeakSet.
-            onceForChunkSet.add(chunk);
+              // Mark the chunk as processed by adding it to the WeakSet.
+              onceForChunkSet.add(chunk);
 
-            if (chunk.hasRuntime()) {
-              // Add the runtime modules to the chunk, which handles
-              // the runtime logic for wrapping with lavamoat.
-              lavaMoatRuntime.addTo({
-                compilation,
-                chunk,
-              });
+              if (chunk.hasRuntime()) {
+                // Add the runtime modules to the chunk, which handles
+                // the runtime logic for wrapping with lavamoat.
+                lavaMoatRuntime.addTo({
+                  compilation,
+                  chunk,
+                });
+              }
+
+              STATE.transition("runtimeBuilt");
             }
           }
         );

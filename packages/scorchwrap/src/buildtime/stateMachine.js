@@ -7,7 +7,7 @@ const diag = require("./diagnostics");
  * @param {object} options
  * @param {Record<string,[string,string]>} options.transitions
  * @param {string} options.start
- * @returns {EventEmitter & { getState: () => string, transition: (transitionName: string) => void }}
+ * @returns {EventEmitter & { assert: (expectedState: string) => void, is: (expectedState: string) => boolean, transition: (transitionName: string) => void }}
  */
 module.exports = function stateMachine({ transitions, start }) {
   let currentState = start;
@@ -28,10 +28,21 @@ module.exports = function stateMachine({ transitions, start }) {
       );
     }
     currentState = tr[1];
-    diag.rawDebug(1, `> state transition ${tr.join("=>")}`);
+    diag.rawDebug(1, `\n> state transition ${tr.join("=>")}`);
 
     emit(currentState);
   };
-  API.getState = () => currentState;
+  API.is = (query) => {
+    diag.rawDebug(3, `\n> Checking (${currentState}).is(${query})`);
+    return currentState === query;
+  };
+  API.assert = (query) => {
+    if (currentState !== query) {
+      diag.rawDebug(
+        1,
+        `\n> Expected state '${query}' but got '${currentState}'`
+      );
+    }
+  };
   return API;
 };
