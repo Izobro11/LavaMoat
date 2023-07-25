@@ -88,11 +88,14 @@ w --> b[use short identifiers in the bundle and inlined policy]
 
 ```
 
+#### Ignored modules
 Webpack generates this:
 ```
 const nodeCrypto = __webpack_require__(/*! crypto */ "?0b7d");
 ```
-and it shows up where I list modules, but it doesn't have an associated path and I can't seem to figure out how it should be handled. It's the closest thing to a builtin in the browser. Maybe instead of handling builtins as packages we need special logic for stuff like `buffer` and `events` and this thing. Or maybe just this thing.
+when a module is ignored (Node builtins are a good example of that. If you want a builtin to work, you sometimes need to supply a package for it as a dependency yourself)
+A carveout is necessary in policy enforcement for these modules. 
+Sadly, even treeshaking doesn't eliminate that module. It's left there and failing to work when reached by runtime control flow.
 
 ## Manual testing
 

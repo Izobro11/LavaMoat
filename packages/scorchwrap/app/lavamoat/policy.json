@@ -1,5 +1,10 @@
 {
   "resources": {
+    "leftpad": {},
+    "buffer>ieee754": {},
+    "@ethereumjs/util>@chainsafe/ssz>case": {},
+    "events": {},
+
     "buffer": {
       "packages":{
         "buffer>base64-js": true,

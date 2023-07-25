@@ -7,6 +7,7 @@
 
 /** @typedef {object} ScorchWrapPluginOptions
  * @property {boolean} [runChecks] - check resulting code with wrapping for correctnesss
+ * @property {boolean} [readableResourceIds] - should resourceIds be readable or turned into numbers - defaults to (mode==='development')
  * @property {number} [diagnosticsVerbosity] - a number representing diagnostics output verbosity, the larger the more overwhelming
  * @property {object} policy - LavaMoat policy
  * @property {object} [lockdown] - options to pass to lockdown
@@ -21,10 +22,7 @@ const {
   // ModuleDependency,
 } = require("webpack");
 const { wrapper } = require("./buildtime/wrapper");
-const {
-  pathsToIdentifiers,
-  generateIdentifierLookup,
-} = require("./buildtime/aa");
+const { generateIdentifierLookup } = require("./buildtime/aa");
 const diag = require("./buildtime/diagnostics");
 const stateMachine = require("./buildtime/stateMachine");
 
@@ -120,7 +118,6 @@ const wrapGeneratorMaker = ({
      * @returns {Source}
      */
     generatorInstance.generate = function (module, options) {
-      console.error(">>>G");
       diag.rawDebug(5, {
         module,
         options,
@@ -156,7 +153,11 @@ const wrapGeneratorMaker = ({
         });
       }
 
-      const packageId = getIdentifierForPath(module.request);
+      const packageId = getIdentifierForPath(module.resource);
+      if (packageId === undefined) {
+        console.log(module) 
+        throw Error(`Failed to find a packageId for ${module.resource}`);
+      }
 
       let { before, after, source, sourceChanged } = wrapper({
         // There's probably a good reason why webpack stores source in those objects instead
@@ -167,7 +168,7 @@ const wrapGeneratorMaker = ({
         id: packageId,
         runtimeKit: processRequirements(options.runtimeRequirements, module),
         runChecks,
-        evalKitFunctionName: `__webpack_require__.${RUNTIME_KEY}.E`,
+        evalKitFunctionName: `__webpack_require__.${RUNTIME_KEY}`,
       });
 
       diag.rawDebug(3, {
@@ -211,8 +212,7 @@ class VirtualRuntimeModule extends RuntimeModule {
 // to avoid confusing anyone into believing it's actually CJS.
 // Criticism will only be accepted in a form of working PR with less total lines and less magic.
 const assembleRuntime = (KEY, runtimeModules) => {
-  let assembly = `__webpack_require__.${KEY} = Object.create(null); 
-  const LAVAMOAT = __webpack_require__.${KEY};`;
+  let assembly = `const LAVAMOAT = Object.create(null);`;
   runtimeModules.map(({ file, data, name, json }) => {
     let sourceString;
     if (file) {
@@ -227,7 +227,9 @@ const assembleRuntime = (KEY, runtimeModules) => {
     assembly += `\n;/*${name}*/;\n${sourceString}`;
   });
   // use harden from SES if available
-  assembly += `;(typeof harden !== 'undefined') && harden(__webpack_require__.${KEY});`;
+  assembly += `;
+  __webpack_require__.${KEY} = LAVAMOAT.runtimeWrapper;
+  (typeof harden !== 'undefined') && harden(__webpack_require__.${KEY});`; // The harden line is likely unnecessary as the handler is being frozen anyway
   return {
     addTo({ compilation, chunk }) {
       compilation.addRuntimeModule(
@@ -270,6 +272,10 @@ class ScorchWrapPlugin {
    */
   apply(compiler) {
     const options = this.options;
+    if (typeof options.readableResourceIds === "undefined") {
+      // default options.readableResourceIds to true if webpack configuration sets development mode
+      options.readableResourceIds = compiler.options.mode !== "production";
+    }
     const STATE = this.STATE;
     let canonicalNameMap;
 
@@ -318,6 +324,7 @@ class ScorchWrapPlugin {
 
         const ignores = [];
         const knownPaths = [];
+        const unenforceableModuleIds = [];
         // let pathToIdentifierLookup = {};
         let identifierLookup;
         const runChecks = this.options.runChecks || diag.level > 0;
@@ -325,17 +332,23 @@ class ScorchWrapPlugin {
         // Caveat: this might be called before the lookup map is ready if a plugin is running a child compilation or alike.
         // Note that in those cases wrapped code is not meant to run and policy will be empty.
         const getIdentifierForPath = (p) => {
-          const withoutLoaders = p.replace(/[?!].*$/, "");
-          return identifierLookup.pathToResourceId(withoutLoaders) || "none";
+          return identifierLookup.pathToResourceId(p);
         };
 
         // trigger for paths processing - after they've been collected
         STATE.on("pathsCollected", () => {
           identifierLookup = generateIdentifierLookup({
+            readableResourceIds: options.readableResourceIds,
+            unenforceableModuleIds,
             paths: knownPaths,
             policy: options.policy,
             canonicalNameMap,
           });
+          mainCompilationWarnings.push(
+            new WebpackError(
+              `ScorchWrapPlugin: the following module ids can't be controlled by policy and must be ignored at runtime: \n  ${unenforceableModuleIds.join()}`
+            )
+          );
           STATE.transition("pathProcessingDone");
         });
 
@@ -366,7 +379,15 @@ class ScorchWrapPlugin {
           chunks.forEach((chunk) => {
             chunkGraph.getChunkModules(chunk).forEach((module) => {
               const moduleId = chunkGraph.getModuleId(module);
-              knownPaths.push({ path: module.resource, moduleId }); // typescript is complaining about the use of `resource` here, but it's actually there.
+              if (
+                module.type === JAVASCRIPT_MODULE_TYPE_DYNAMIC &&
+                module.identifierStr &&
+                module.identifierStr.startsWith("ignored")
+              ) {
+                unenforceableModuleIds.push(moduleId);
+              } else {
+                knownPaths.push({ path: module.resource, moduleId }); // typescript is complaining about the use of `resource` here, but it's actually there.
+              }
             });
           });
           diag.rawDebug(4, { knownPaths });
@@ -422,7 +443,7 @@ class ScorchWrapPlugin {
             if (STATE.getState() !== "pathsProcessed") {
               mainCompilationWarnings.push(
                 new WebpackError(
-                  "ScorchWrapPlugin: generating runtime before all modules resolved. This might be part of a sub-compilation of a plugin."
+                  "ScorchWrapPlugin: generating runtime before all modules resolved. This might be part of a sub-compilation of a plugin. Please check for any unwanted interference between plugins."
                 )
               );
               policyData = {};
@@ -433,8 +454,18 @@ class ScorchWrapPlugin {
 
             const lavaMoatRuntime = assembleRuntime(RUNTIME_KEY, [
               {
+                name: "root",
+                data: identifierLookup?.root,
+                json: true,
+              },
+              {
                 name: "idmap",
                 data: identifierLookup?.identifiersForModuleIds,
+                json: true,
+              },
+              {
+                name: "unenforceable",
+                data: identifierLookup?.unenforceableModuleIds,
                 json: true,
               },
               { name: "options", data: runtimeOptions, json: true },

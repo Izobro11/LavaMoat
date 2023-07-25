@@ -35,9 +35,8 @@ const stricterScopeTerminator = freeze(
 const enforcePolicy = (requestedResourceId, referrerResourceId) => {
   requestedResourceId = "" + requestedResourceId;
   referrerResourceId = "" + referrerResourceId;
-  // TODO: make root check reasonable
   if (
-    referrerResourceId === "$root$" ||
+    referrerResourceId === LAVAMOAT.root ||
     requestedResourceId === referrerResourceId
   ) {
     return;
@@ -45,12 +44,12 @@ const enforcePolicy = (requestedResourceId, referrerResourceId) => {
   // TODO: switch from warnings to errors when AAs consistency is resolved
   const myPolicy = LAVAMOAT.policy.resources[referrerResourceId];
   if (!myPolicy) {
-    return console.warn("Policy missing for " + referrerResourceId);
+    throw Error("Policy missing for " + referrerResourceId);
   }
   if (myPolicy.packages && myPolicy.packages[requestedResourceId]) {
     return;
   }
-  console.warn(
+  throw Error(
     "Policy does not allow importing " +
       requestedResourceId +
       " from " +
@@ -71,11 +70,11 @@ const getGlobalsForPolicy = (resourceId) => {
         })
     );
   }
-  if (resourceId === "$root$") {
+  if (resourceId === LAVAMOAT.root) {
     return {
       ...globalThis,
-      console
-    }
+      console,
+    };
   }
   // I could return a subset of globals
   return {};
@@ -93,8 +92,10 @@ const findResourceId = (moduleId) => {
 
 const wrapRequireWithPolicy = (__webpack_require__, referrerResourceId) =>
   function (specifier) {
-    const requestedResourceId = findResourceId(specifier);
-    enforcePolicy(requestedResourceId, referrerResourceId);
+    if (!LAVAMOAT.unenforceable.includes(specifier)) {
+      const requestedResourceId = findResourceId(specifier);
+      enforcePolicy(requestedResourceId, referrerResourceId);
+    }
     return __webpack_require__.apply(this, arguments);
   };
 
@@ -152,4 +153,4 @@ const lavamoatRuntimeWrapper = (resourceId, runtimeKit) => {
   };
 };
 
-LAVAMOAT.E = freeze(lavamoatRuntimeWrapper);
+LAVAMOAT.runtimeWrapper = freeze(lavamoatRuntimeWrapper);
