@@ -116,3 +116,4 @@ temp/
 .idea
 
 packages/allow-scripts/types
+packages/aa/types
